@@ -1,0 +1,32 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+
+# Secrets
+.env
+.env.*
+*.key
+*.pem
+
+# Models and datasets
+*.pt
+*.pth
+*.onnx
+*.engine
+*.trt
+*.weights
+datasets/
+models/
+
+# Generated work
+artifacts/
+outputs/
+runs/
+*.log
+
+# Editors / OS
+.vscode/
+.idea/
+.DS_Store
