@@ -1,0 +1,29 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "edgeopt-agent"
+version = "0.1.0"
+description = "A bounded, evidence-first model-to-edge optimization vertical slice"
+requires-python = ">=3.12"
+dependencies = [
+  "numpy>=1.26,<3",
+  "onnx>=1.16,<2",
+  "onnxruntime>=1.18,<2",
+  "mcp>=1.0,<2",
+]
+
+[project.optional-dependencies]
+test = ["pytest>=8,<9"]
+
+[project.scripts]
+edgeopt-demo-prepare = "edgeopt.demo.prepare:main"
+edgeopt-demo-run = "edgeopt.demo.run:main"
+edgeopt-mcp = "edgeopt.mcp_server:main"
+
+[tool.setuptools.packages.find]
+include = ["edgeopt*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
