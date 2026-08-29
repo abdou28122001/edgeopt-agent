@@ -125,7 +125,7 @@ def test_package_requires_verified_approval_and_artifact_identity(tmp_path: Path
     unrelated = tmp_path / "unrelated.onnx"
     unrelated.write_bytes(model.read_bytes())
     output = package(unrelated, tmp_path / "unrelated-package", manifest, approved=True)
-    assert (output / unrelated.name).read_bytes() == model.read_bytes()
+    assert (output / "selected-artifact.onnx").read_bytes() == model.read_bytes()
     tampered = tmp_path / "tampered.onnx"
     shutil.copy2(model, tampered)
     tampered.write_bytes(tampered.read_bytes() + b"changed")
@@ -136,7 +136,7 @@ def test_package_requires_verified_approval_and_artifact_identity(tmp_path: Path
         package(model, tmp_path / "rejected-package", rejected, approved=True)
     output = package(model, tmp_path / "valid-package", manifest, approved=True)
     assert (output / "run-manifest.json").exists()
-    assert (output / model.name).exists()
+    assert (output / "selected-artifact.onnx").exists()
 
 
 def test_recomputed_public_hash_without_trusted_tag_still_fails(tmp_path: Path) -> None:
@@ -284,7 +284,18 @@ def test_shared_env_key_allows_host_verify_and_cross_directory_package(tmp_path:
     host_model.parent.mkdir()
     shutil.copy2(data["model_path"], host_model)
     output = package(host_model, tmp_path / "host" / "package", manifest, approved=True)
-    assert (output / host_model.name).read_bytes() == host_model.read_bytes()
+    assert (output / "selected-artifact.onnx").read_bytes() == host_model.read_bytes()
     host_model.write_bytes(host_model.read_bytes() + b"tamper")
     with pytest.raises(PermissionError, match="verified"):
         package(host_model, tmp_path / "host" / "tampered-package", manifest, approved=True)
+
+
+@pytest.mark.parametrize("collision_name", ["run-manifest.json", "report.md"])
+def test_package_reserves_artifact_name_from_metadata_collisions(tmp_path: Path, collision_name: str) -> None:
+    _, manifest, data = prepared(tmp_path / "sandbox")
+    renamed = tmp_path / "sandbox" / collision_name
+    shutil.copy2(data["model_path"], renamed)
+    output = package(renamed, tmp_path / "package", manifest, approved=True)
+    assert (output / "selected-artifact.onnx").read_bytes() == renamed.read_bytes()
+    assert (output / "run-manifest.json").is_file()
+    assert (output / "report.md").is_file()
