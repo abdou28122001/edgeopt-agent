@@ -102,6 +102,8 @@ def make_quality_rule(evaluation_id: str, baseline: dict[str, Any]) -> QualityRu
 
 
 def ensure_same_binding(candidate: dict[str, Any], evaluation_id: str, rule: QualityRule, baseline: dict[str, Any]) -> None:
+    if rule.baseline_evidence_id != baseline.get("evidence_id") or rule.baseline_evidence_sha256 != baseline.get("evidence_sha256") or rule.baseline_evidence_sha256 != evidence_hash(baseline):
+        raise ValueError("quality rule baseline binding mismatch")
     required = {
         "evaluation_id": evaluation_id,
         "quality_rule_id": rule.quality_rule_id,
@@ -116,7 +118,7 @@ def ensure_same_binding(candidate: dict[str, Any], evaluation_id: str, rule: Qua
 
 
 def authenticate_rule(rule: QualityRule, baseline: dict[str, Any]) -> bool:
-    if rule.baseline_evidence_id != baseline.get("evidence_id") or rule.baseline_evidence_sha256 != evidence_hash(baseline):
+    if rule.baseline_evidence_id != baseline.get("evidence_id") or rule.baseline_evidence_sha256 != baseline.get("evidence_sha256") or rule.baseline_evidence_sha256 != evidence_hash(baseline):
         return False
     if rule.baseline_attestation_key_id != baseline.get("attestation_key_id") or rule.baseline_attestation_tag != baseline.get("attestation_tag"):
         return False

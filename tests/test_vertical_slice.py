@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import json
+import multiprocessing
+import os
 import shutil
 from pathlib import Path
 
@@ -10,6 +12,7 @@ from edgeopt.contracts import DeploymentContract, QualityRule, evidence_hash
 from edgeopt.demo.prepare import create_fixture
 from edgeopt.mcp_server import edgeopt_verify
 from edgeopt.runtime import package, run_demo, verify
+from edgeopt.trust import attest, ensure_key, verify_attestation
 
 
 def prepared(tmp_path: Path) -> tuple[Path, dict, dict]:
@@ -159,6 +162,17 @@ def test_rule_rebinding_fails_closed(tmp_path: Path) -> None:
     assert verify(contract, manifest["baseline"], manifest["candidate"], changed_rule)["decision"] == "rejected"
 
 
+def test_binding_helper_checks_rule_baseline_directly(tmp_path: Path) -> None:
+    _, manifest, _ = prepared(tmp_path)
+    from edgeopt.contracts import ensure_same_binding
+    rule = QualityRule(**manifest["quality_rule"])
+    substituted = QualityRule(**dict(manifest["quality_rule"], baseline_evidence_id="other-baseline"))
+    with pytest.raises(ValueError, match="quality rule baseline"):
+        ensure_same_binding(manifest["candidate"], manifest["contract"]["evaluation"]["evaluation_id"], substituted, manifest["baseline"])
+    with pytest.raises(ValueError, match="quality rule baseline"):
+        ensure_same_binding(manifest["candidate"], manifest["contract"]["evaluation"]["evaluation_id"], rule, dict(manifest["baseline"], evidence_sha256="stale"))
+
+
 def test_package_rejects_contract_artifact_hash_mismatch(tmp_path: Path) -> None:
     _, manifest, data = prepared(tmp_path)
     manifest["contract"]["model"]["artifact_sha256"] = "0" * 64
@@ -178,3 +192,28 @@ def test_malformed_numeric_objectives_fail_controlled(tmp_path: Path, key: str, 
     changed = dict(data["contract"], objectives={**data["contract"]["objectives"], key: value})
     with pytest.raises(ValueError, match="finite non-negative"):
         DeploymentContract(**changed).validate()
+
+
+def _concurrent_key_worker(state: str, queue: object) -> None:
+    os.environ["EDGEOPT_STATE_DIR"] = state
+    from edgeopt.trust import ensure_key
+    queue.put(ensure_key().hex())
+
+
+def test_first_use_key_creation_is_cross_process_safe(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    state = tmp_path / "concurrent-state"
+    ctx = multiprocessing.get_context("spawn")
+    queue = ctx.Queue()
+    processes = [ctx.Process(target=_concurrent_key_worker, args=(str(state), queue)) for _ in range(8)]
+    for process in processes:
+        process.start()
+    for process in processes:
+        process.join(10)
+        assert process.exitcode == 0
+    values = [queue.get(timeout=2) for _ in processes]
+    assert len(set(values)) == 1
+    assert state.joinpath("attestation.key").read_bytes().hex() == values[0]
+    monkeypatch.setenv("EDGEOPT_STATE_DIR", str(state))
+    record = {"measurement": 1, "attestation_key_id": ""}
+    record["attestation_key_id"], record["attestation_tag"] = attest(record)
+    assert verify_attestation(record)
