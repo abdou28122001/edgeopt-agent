@@ -9,6 +9,81 @@ small declared candidate set, executes real tools in a sandbox, benchmarks and
 verifies each result, critiques measured trade-offs, and stops at a human
 approval gate before packaging.
 
+## Product philosophy
+
+EdgeOpt is an agentic, hardware-aware model-to-edge deployment engineer:
+understand before optimizing, measure instead of assume, optimize only as much
+as the deployment contract requires, never let an LLM invent or override
+measurements, and never package or deploy before explicit approval. TrueForge
+owns orchestration; deterministic adapters and typed tools own inspection,
+conversion, execution, benchmarking, verification, and packaging.
+
+The full vision is `supported model + evaluation data + target profile + real
+application context + user objectives → capability discovery → bounded adaptive
+optimization → benchmarking → verifier/critic → approval → deployment
+artifact`. The hackathon v0 deliberately implements only `ONNX CPU fixture →
+baseline → one measured ONNX Runtime graph candidate → one incompatible
+candidate rejected → evidence → verifier → approval-gated package`.
+
+## DeploymentContract
+
+The first-class input is a normalized `DeploymentContract` with five sections:
+
+- **model:** source/reference, format/framework, task, artifact hash, and known
+  input/output schemas.
+- **evaluation:** fixture/dataset reference and hash, split semantics,
+  preprocessing identity/hash, metric or synthetic-similarity definition, and
+  future calibration/evaluation separation.
+- **target:** device/profile ID, verified capabilities/runtime/provider, known
+  CPU/GPU/memory, and a measured-vs-profiled source-of-truth marker.
+- **application_context:** use case, sensor/input source, expected resolution
+  or batch size, and known decode/preprocess/inference/postprocess constraints.
+- **objectives:** explicit priority (`speed`, `quality`, `memory`, `balanced`,
+  or `custom`) and hard constraints such as quality degradation, p95 latency,
+  throughput, memory, and artifact size.
+
+An unspecified priority may resolve to a documented default, but the resolved
+policy is visible. The contract is generic enough for a future road-camera /
+Jetson profile while the v0 demo uses only a synthetic CPU context.
+
+`max_memory_mb` is not supported or enforced by CPU v0 because memory is not
+measured. A non-null memory hard constraint fails closed until a future adapter
+provides measured memory evidence; no proxy value may be presented as memory
+measurement.
+
+Evidence content hashes identify bytes but are not authenticity proof by
+themselves. The local runtime adds an HMAC-SHA256 attestation using a randomly
+generated key in the ignored, private `.edgeopt-state/attestation.key` (best-
+effort mode `0600`). The key is not in manifests, packages, logs, or Drive.
+MCP callers may edit a manifest and recompute its public SHA-256, but they
+cannot produce a valid attestation without the runtime-owned key. A later
+TrueForge integration may inject an ephemeral per-run secret into the sandbox.
+
+## Adapter and optimization boundaries
+
+ONNX is the canonical v0 interchange format, not a rule that every future model
+must first convert to ONNX. A small adapter/registry boundary leaves room for
+`onnx_export`, `onnxruntime_graph_optimization`,
+`nvidia_modelopt_ptq`, `nvidia_modelopt_pruning_or_sparsity`,
+`tensorrt_build`, and `openvino_compile`. Only the ONNX Runtime CPU adapter is
+implemented now; future adapters are capability-gated and must not add their
+heavy dependencies until verified.
+
+The cost-aware ladder is: 0 baseline, 1 runtime/graph optimization, 2 post-
+training quantization, 3 precision/resolution/runtime alternatives, 4
+pruning/sparsity, and 5 QAT/fine-tuning/distillation. v0 implements levels 0/1
+and a deterministic capability rejection; it does not train or search
+unboundedly.
+
+## Connected target versus profile
+
+A connected/measured target may report performance as measured on that target.
+A static or snapshot profile can establish compatibility from declared or
+verified capabilities, but its performance must never be presented as hardware
+measurement. The CPU v0 evidence is local ONNX Runtime measurement on the
+`local-cpu-onnxruntime` profile; it makes no Jetson, DGX Spark, CUDA, TensorRT,
+or Model Optimizer claim.
+
 The first green path is CPU-first ONNX Runtime. NVIDIA Model Optimizer,
 TensorRT, OpenVINO, and research fixtures are optional adapters and must be
 capability-checked before use.

@@ -3,6 +3,7 @@ __pycache__/
 *.py[cod]
 .venv/
 venv/
+*.egg-info/
 
 # Secrets
 .env
@@ -21,6 +22,8 @@ datasets/
 models/
 
 # Generated work
+.edgeopt-demo/
+.edgeopt-state/
 artifacts/
 outputs/
 runs/
