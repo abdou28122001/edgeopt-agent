@@ -4,9 +4,12 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any
+
+from .trust import attest, ensure_key, key_id, verify_attestation
 
 
 def canonical_hash(value: Any) -> str:
@@ -15,8 +18,8 @@ def canonical_hash(value: Any) -> str:
 
 
 def evidence_hash(record: dict[str, Any]) -> str:
-    """Hash all persisted evidence except the self-referential hash field."""
-    return canonical_hash({key: value for key, value in record.items() if key != "evidence_sha256"})
+    """Hash content, excluding self-hash and derived HMAC tag only."""
+    return canonical_hash({key: value for key, value in record.items() if key not in {"evidence_sha256", "attestation_tag"}})
 
 
 def file_sha256(path: str | Path) -> str:
@@ -47,7 +50,11 @@ class DeploymentContract:
         if self.objectives.get("priority") == "custom" and not self.objectives.get("custom_metric"):
             raise ValueError("custom priority requires custom_metric")
         if self.objectives.get("max_memory_mb") is not None:
-            raise ValueError("max_memory_mb is not measured by the CPU v0 path")
+            raise ValueError("max_memory_mb is unsupported and not measured by the CPU v0 path")
+        for key in ("max_quality_degradation", "max_p95_latency_ms", "min_throughput", "max_model_size_mb"):
+            value = self.objectives.get(key)
+            if value is not None and (isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value) or value < 0):
+                raise ValueError(f"objectives.{key} must be a finite non-negative number")
 
     def to_dict(self) -> dict[str, Any]:
         self.validate()
@@ -65,23 +72,33 @@ class QualityRule:
     allowed_degradation: float
     baseline_evidence_id: str
     baseline_evidence_sha256: str
+    baseline_attestation_key_id: str
+    baseline_attestation_tag: str
+    attestation_key_id: str
+    attestation_tag: str
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
 
 
-def make_quality_rule(evaluation_id: str, baseline_id: str, baseline_hash: str) -> QualityRule:
+def make_quality_rule(evaluation_id: str, baseline: dict[str, Any]) -> QualityRule:
     body = {
         "evaluation_id": evaluation_id,
         "metric_id": "synthetic_output_mae_vs_baseline",
         "direction": "lower_is_better",
         "drop_mode": "absolute",
         "allowed_degradation": 1e-6,
-        "baseline_evidence_id": baseline_id,
-        "baseline_evidence_sha256": baseline_hash,
+        "baseline_evidence_id": baseline["evidence_id"],
+        "baseline_evidence_sha256": evidence_hash(baseline),
         "version": "v0",
+        "baseline_attestation_key_id": baseline["attestation_key_id"],
+        "baseline_attestation_tag": baseline["attestation_tag"],
+        "attestation_key_id": key_id(ensure_key()),
     }
-    return QualityRule(quality_rule_id=canonical_hash(body)[:16], **{k: body[k] for k in body if k != "quality_rule_id"})
+    body["quality_rule_id"] = canonical_hash({k: v for k, v in body.items() if k != "attestation_tag"})[:16]
+    _, tag = attest(body)
+    body["attestation_tag"] = tag
+    return QualityRule(**body)
 
 
 def ensure_same_binding(candidate: dict[str, Any], evaluation_id: str, rule: QualityRule, baseline: dict[str, Any]) -> None:
@@ -96,3 +113,11 @@ def ensure_same_binding(candidate: dict[str, Any], evaluation_id: str, rule: Qua
     for key, expected in required.items():
         if candidate.get(key) != expected:
             raise ValueError(f"evidence binding mismatch: {key}")
+
+
+def authenticate_rule(rule: QualityRule, baseline: dict[str, Any]) -> bool:
+    if rule.baseline_evidence_id != baseline.get("evidence_id") or rule.baseline_evidence_sha256 != evidence_hash(baseline):
+        return False
+    if rule.baseline_attestation_key_id != baseline.get("attestation_key_id") or rule.baseline_attestation_tag != baseline.get("attestation_tag"):
+        return False
+    return verify_attestation(rule.to_dict())

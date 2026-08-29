@@ -36,6 +36,12 @@ directory containing `run-manifest.json`, `baseline.json`, `candidate-a.json`,
 records hashes, the immutable evaluation/rule binding, measurements, and the
 fact that the target is a profiled local CPU.
 
+`max_memory_mb` is intentionally unsupported in the CPU v0 path because this
+slice does not measure memory; supplying it fails closed. A future adapter may
+support it only with measured memory evidence. Local evidence also carries a
+private HMAC attestation held under the ignored `.edgeopt-state/` directory;
+the key is generated locally and is never included in manifests or packages.
+
 ## Flow
 
 `DeploymentContract → inspect/profile → baseline → measured ONNX Runtime graph

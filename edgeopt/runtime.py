@@ -11,7 +11,8 @@ from typing import Any
 import numpy as np
 import onnxruntime as ort
 
-from .contracts import DeploymentContract, QualityRule, canonical_hash, evidence_hash, file_sha256, ensure_same_binding, make_quality_rule
+from .contracts import DeploymentContract, QualityRule, authenticate_rule, canonical_hash, evidence_hash, file_sha256, ensure_same_binding, make_quality_rule
+from .trust import attest, ensure_key, key_id, verify_attestation
 
 
 def _session(model: Path, optimized: bool) -> ort.InferenceSession:
@@ -60,6 +61,7 @@ def _evidence(run_id: str, candidate_id: str, contract: DeploymentContract, mode
         "device_profile_id": contract.target["profile_id"],
         "execution_profile_id": "local-cpu-onnxruntime",
         "measurement_source": "local_cpu_execution",
+        "attestation_key_id": key_id(ensure_key()),
         "provider": metrics["provider"],
         "runtime": metrics["runtime"],
         "runtime_version": metrics["runtime_version"],
@@ -82,6 +84,7 @@ def _evidence(run_id: str, candidate_id: str, contract: DeploymentContract, mode
             "baseline_evidence_sha256": baseline["evidence_sha256"],
         })
     record["evidence_sha256"] = evidence_hash(record)
+    record["attestation_key_id"], record["attestation_tag"] = attest(record)
     return record
 
 
@@ -111,8 +114,10 @@ def verify(contract: DeploymentContract, baseline: dict[str, Any], candidate: di
     contract.validate()
     if contract.target.get("profile_id") != "local-cpu-onnxruntime" or contract.target.get("provider") != "cpu" or "CPUExecutionProvider" not in contract.target.get("verified_capabilities", []):
         return {"decision": "rejected", "reason": "local CPU execution requires the local-cpu-onnxruntime target profile", "measured": False, "constraints": []}
-    if not _integrity_ok(baseline) or not _integrity_ok(candidate):
-        return {"decision": "rejected", "reason": "evidence hash mismatch", "measured": False, "constraints": []}
+    if not _integrity_ok(baseline) or not _integrity_ok(candidate) or not verify_attestation(baseline) or not verify_attestation(candidate):
+        return {"decision": "rejected", "reason": "evidence integrity or trusted attestation failed", "measured": False, "constraints": []}
+    if not authenticate_rule(rule, baseline):
+        return {"decision": "rejected", "reason": "quality rule baseline binding or attestation failed", "measured": False, "constraints": []}
     if candidate.get("model_sha256") != baseline.get("model_sha256") or candidate.get("artifact_size_bytes") != baseline.get("artifact_size_bytes"):
         return {"decision": "rejected", "reason": "candidate artifact identity differs from measured baseline", "measured": False, "constraints": []}
     try:
@@ -157,7 +162,7 @@ def package(selected_model: Path, output: Path, manifest: dict[str, Any], approv
         raise PermissionError("manifest decision does not match freshly verified recommendation")
     selected = manifest["candidate"] if decision["decision"] == "recommend_candidate" else manifest["baseline"]
     expected_path = Path(contract.model["source"]).resolve()
-    if Path(selected_model).resolve() != expected_path or file_sha256(selected_model) != selected["model_sha256"]:
+    if Path(selected_model).resolve() != expected_path or file_sha256(selected_model) != selected["model_sha256"] or selected["model_sha256"] != contract.model["artifact_sha256"]:
         raise PermissionError("selected artifact is not the verified measured artifact")
     output.mkdir(parents=True, exist_ok=True)
     shutil.copy2(selected_model, output / selected_model.name)
@@ -184,7 +189,7 @@ def run_demo(spec_path: Path, output: Path) -> dict[str, Any]:
     run_id = spec.get("run_id", "edgeopt-local")
     base_output, base_metrics = measure(model, inputs, optimized=False)
     baseline = _evidence(run_id, "baseline", contract, model, fixture, base_output[0], base_metrics, None, None, None)
-    rule = make_quality_rule(contract.evaluation["evaluation_id"], baseline["evidence_id"], baseline["evidence_sha256"])
+    rule = make_quality_rule(contract.evaluation["evaluation_id"], baseline)
     cand_output, cand_metrics = measure(model, inputs, optimized=True)
     candidate = _evidence(run_id, "candidate-a-ort-optimized", contract, model, fixture, cand_output[0], cand_metrics, base_output[0], baseline, rule)
     decision = verify(contract, baseline, candidate, rule)

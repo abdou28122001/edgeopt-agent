@@ -132,3 +132,49 @@ def test_package_requires_verified_approval_and_artifact_identity(tmp_path: Path
     output = package(model, tmp_path / "valid-package", manifest, approved=True)
     assert (output / "run-manifest.json").exists()
     assert (output / model.name).exists()
+
+
+def test_recomputed_public_hash_without_trusted_tag_still_fails(tmp_path: Path) -> None:
+    _, manifest, _ = prepared(tmp_path)
+    contract, rule = DeploymentContract(**manifest["contract"]), QualityRule(**manifest["quality_rule"])
+    forged = dict(manifest["candidate"], p95_latency_ms=0.0)
+    forged["evidence_sha256"] = evidence_hash(forged)
+    assert verify(contract, manifest["baseline"], forged, rule)["decision"] == "rejected"
+
+
+def test_replaced_attestation_key_cannot_validate_old_evidence(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    first_state = tmp_path / "state-a"
+    monkeypatch.setenv("EDGEOPT_STATE_DIR", str(first_state))
+    _, manifest, _ = prepared(tmp_path / "run-a")
+    contract, rule = DeploymentContract(**manifest["contract"]), QualityRule(**manifest["quality_rule"])
+    monkeypatch.setenv("EDGEOPT_STATE_DIR", str(tmp_path / "state-b"))
+    result = verify(contract, manifest["baseline"], manifest["candidate"], rule)
+    assert result["decision"] == "rejected"
+
+
+def test_rule_rebinding_fails_closed(tmp_path: Path) -> None:
+    _, manifest, _ = prepared(tmp_path)
+    contract = DeploymentContract(**manifest["contract"])
+    changed_rule = QualityRule(**dict(manifest["quality_rule"], allowed_degradation=99.0))
+    assert verify(contract, manifest["baseline"], manifest["candidate"], changed_rule)["decision"] == "rejected"
+
+
+def test_package_rejects_contract_artifact_hash_mismatch(tmp_path: Path) -> None:
+    _, manifest, data = prepared(tmp_path)
+    manifest["contract"]["model"]["artifact_sha256"] = "0" * 64
+    with pytest.raises(PermissionError, match="verified"):
+        package(Path(data["model_path"]), tmp_path / "hash-mismatch", manifest, approved=True)
+
+
+@pytest.mark.parametrize("key, value", [
+    ("max_p95_latency_ms", "fast"),
+    ("min_throughput", float("nan")),
+    ("max_model_size_mb", float("inf")),
+    ("max_p95_latency_ms", -1),
+    ("min_throughput", True),
+])
+def test_malformed_numeric_objectives_fail_controlled(tmp_path: Path, key: str, value: object) -> None:
+    _, _, data = prepared(tmp_path)
+    changed = dict(data["contract"], objectives={**data["contract"]["objectives"], key: value})
+    with pytest.raises(ValueError, match="finite non-negative"):
+        DeploymentContract(**changed).validate()

@@ -46,6 +46,19 @@ An unspecified priority may resolve to a documented default, but the resolved
 policy is visible. The contract is generic enough for a future road-camera /
 Jetson profile while the v0 demo uses only a synthetic CPU context.
 
+`max_memory_mb` is not supported or enforced by CPU v0 because memory is not
+measured. A non-null memory hard constraint fails closed until a future adapter
+provides measured memory evidence; no proxy value may be presented as memory
+measurement.
+
+Evidence content hashes identify bytes but are not authenticity proof by
+themselves. The local runtime adds an HMAC-SHA256 attestation using a randomly
+generated key in the ignored, private `.edgeopt-state/attestation.key` (best-
+effort mode `0600`). The key is not in manifests, packages, logs, or Drive.
+MCP callers may edit a manifest and recompute its public SHA-256, but they
+cannot produce a valid attestation without the runtime-owned key. A later
+TrueForge integration may inject an ephemeral per-run secret into the sandbox.
+
 ## Adapter and optimization boundaries
 
 ONNX is the canonical v0 interchange format, not a rule that every future model

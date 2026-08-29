@@ -23,6 +23,7 @@ models/
 
 # Generated work
 .edgeopt-demo/
+.edgeopt-state/
 artifacts/
 outputs/
 runs/
