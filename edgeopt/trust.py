@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import base64
+import binascii
 import hashlib
 import hmac
 import json
@@ -24,6 +26,15 @@ def _canonical(value: Any) -> bytes:
 
 
 def ensure_key() -> bytes:
+    encoded = os.environ.get("EDGEOPT_ATTESTATION_KEY_B64")
+    if encoded is not None:
+        try:
+            key = base64.b64decode(encoded, validate=True)
+        except (binascii.Error, ValueError) as exc:
+            raise ValueError("trusted attestation key is invalid") from exc
+        if len(key) != 32:
+            raise ValueError("trusted attestation key is invalid")
+        return key
     path = _key_path()
     path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
     try:

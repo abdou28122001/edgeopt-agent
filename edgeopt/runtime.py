@@ -161,8 +161,7 @@ def package(selected_model: Path, output: Path, manifest: dict[str, Any], approv
     if not isinstance(stored_decision, dict) or stored_decision.get("decision") != decision.get("decision") or stored_decision.get("measured") is not True or stored_decision.get("constraints") != decision.get("constraints"):
         raise PermissionError("manifest decision does not match freshly verified recommendation")
     selected = manifest["candidate"] if decision["decision"] == "recommend_candidate" else manifest["baseline"]
-    expected_path = Path(contract.model["source"]).resolve()
-    if Path(selected_model).resolve() != expected_path or file_sha256(selected_model) != selected["model_sha256"] or selected["model_sha256"] != contract.model["artifact_sha256"]:
+    if file_sha256(selected_model) != selected["model_sha256"] or selected["model_sha256"] != contract.model["artifact_sha256"]:
         raise PermissionError("selected artifact is not the verified measured artifact")
     output.mkdir(parents=True, exist_ok=True)
     shutil.copy2(selected_model, output / selected_model.name)

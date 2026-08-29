@@ -30,7 +30,13 @@ def edgeopt_verify(run_manifest_path: str) -> dict:
 
 
 @mcp.tool()
-def edgeopt_package(run_manifest_path: str, selected_model_path: str, output_dir: str, approved: bool = False) -> dict:
+def edgeopt_package(run_manifest_path: str, selected_model_path: str, output_dir: str, approved: bool) -> dict:
+    """Request approval-gated packaging of a freshly verified artifact.
+
+    ``approved=true`` is explicit packaging intent; the TrueForge harness must
+    still mark this tool approval-required and intercept it before execution.
+    The deterministic runtime remains fail-closed when approved is false.
+    """
     if not approved:
         raise ValueError("explicit approved=true is required")
     output = package(Path(selected_model_path), Path(output_dir), json.loads(Path(run_manifest_path).read_text()), approved)

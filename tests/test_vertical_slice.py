@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import json
+import base64
+import inspect
 import multiprocessing
 import os
 import shutil
@@ -10,7 +12,7 @@ import pytest
 
 from edgeopt.contracts import DeploymentContract, QualityRule, evidence_hash
 from edgeopt.demo.prepare import create_fixture
-from edgeopt.mcp_server import edgeopt_verify
+from edgeopt.mcp_server import edgeopt_package, edgeopt_verify
 from edgeopt.runtime import package, run_demo, verify
 from edgeopt.trust import attest, ensure_key, verify_attestation
 
@@ -122,8 +124,8 @@ def test_package_requires_verified_approval_and_artifact_identity(tmp_path: Path
         package(model, tmp_path / "fabricated", fabricated, approved=True)
     unrelated = tmp_path / "unrelated.onnx"
     unrelated.write_bytes(model.read_bytes())
-    with pytest.raises(PermissionError, match="verified"):
-        package(unrelated, tmp_path / "unrelated-package", manifest, approved=True)
+    output = package(unrelated, tmp_path / "unrelated-package", manifest, approved=True)
+    assert (output / unrelated.name).read_bytes() == model.read_bytes()
     tampered = tmp_path / "tampered.onnx"
     shutil.copy2(model, tampered)
     tampered.write_bytes(tampered.read_bytes() + b"changed")
@@ -217,3 +219,72 @@ def test_first_use_key_creation_is_cross_process_safe(tmp_path: Path, monkeypatc
     record = {"measurement": 1, "attestation_key_id": ""}
     record["attestation_key_id"], record["attestation_tag"] = attest(record)
     assert verify_attestation(record)
+
+
+def _env_attestation_worker(encoded: str, queue: object) -> None:
+    os.environ["EDGEOPT_ATTESTATION_KEY_B64"] = encoded
+    from edgeopt.trust import attest, verify_attestation
+    record = {"measurement": 7}
+    record["attestation_key_id"], record["attestation_tag"] = attest(record)
+    queue.put(verify_attestation(record))
+
+
+def test_env_attestation_is_portable_across_processes(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    key = bytes(range(32))
+    encoded = base64.b64encode(key).decode()
+    monkeypatch.setenv("EDGEOPT_ATTESTATION_KEY_B64", encoded)
+    monkeypatch.setenv("EDGEOPT_STATE_DIR", str(tmp_path / "unused-state"))
+    record = {"measurement": 7}
+    record["attestation_key_id"], record["attestation_tag"] = attest(record)
+    assert verify_attestation(record)
+    ctx = multiprocessing.get_context("spawn")
+    queue = ctx.Queue()
+    process = ctx.Process(target=_env_attestation_worker, args=(encoded, queue))
+    process.start()
+    process.join(10)
+    assert process.exitcode == 0
+    assert queue.get(timeout=2) is True
+    assert not (tmp_path / "unused-state" / "attestation.key").exists()
+
+
+@pytest.mark.parametrize("encoded", ["not-base64", base64.b64encode(b"short").decode()])
+def test_env_attestation_invalid_value_fails_closed(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, encoded: str) -> None:
+    monkeypatch.setenv("EDGEOPT_ATTESTATION_KEY_B64", encoded)
+    monkeypatch.setenv("EDGEOPT_STATE_DIR", str(tmp_path / "state"))
+    with pytest.raises(ValueError, match="invalid"):
+        ensure_key()
+    assert not (tmp_path / "state" / "attestation.key").exists()
+
+
+def test_env_attestation_wrong_key_and_tampering_fail(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    encoded = base64.b64encode(bytes(range(32))).decode()
+    monkeypatch.setenv("EDGEOPT_ATTESTATION_KEY_B64", encoded)
+    record = {"measurement": 7}
+    record["attestation_key_id"], record["attestation_tag"] = attest(record)
+    monkeypatch.setenv("EDGEOPT_ATTESTATION_KEY_B64", base64.b64encode(bytes(range(1, 33))).decode())
+    assert not verify_attestation(record)
+    monkeypatch.setenv("EDGEOPT_ATTESTATION_KEY_B64", encoded)
+    tampered = dict(record, measurement=8)
+    assert not verify_attestation(tampered)
+
+
+def test_mcp_package_requires_explicit_approval_argument() -> None:
+    assert inspect.signature(edgeopt_package).parameters["approved"].default is inspect.Parameter.empty
+    with pytest.raises(ValueError, match="approved"):
+        edgeopt_package("missing.json", "missing.onnx", "output", False)
+
+
+def test_shared_env_key_allows_host_verify_and_cross_directory_package(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("EDGEOPT_ATTESTATION_KEY_B64", base64.b64encode(bytes(range(32))).decode())
+    monkeypatch.setenv("EDGEOPT_STATE_DIR", str(tmp_path / "shared-state"))
+    spec, manifest, data = prepared(tmp_path / "sandbox")
+    manifest_path = tmp_path / "sandbox" / "run" / "run-manifest.json"
+    assert edgeopt_verify(str(manifest_path))["decision"] in {"recommend_candidate", "recommend_baseline"}
+    host_model = tmp_path / "host" / "moved.onnx"
+    host_model.parent.mkdir()
+    shutil.copy2(data["model_path"], host_model)
+    output = package(host_model, tmp_path / "host" / "package", manifest, approved=True)
+    assert (output / host_model.name).read_bytes() == host_model.read_bytes()
+    host_model.write_bytes(host_model.read_bytes() + b"tamper")
+    with pytest.raises(PermissionError, match="verified"):
+        package(host_model, tmp_path / "host" / "tampered-package", manifest, approved=True)
