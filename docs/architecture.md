@@ -72,6 +72,33 @@ model:
   task: classification | detection | segmentation | other
 ```
 
+### Evaluation specification
+
+Every baseline/candidate correctness comparison uses one immutable evaluation
+specification. The baseline and all candidates in one v0 comparison must carry
+the same `evaluation_id`; starting a new comparison is outside v0 scope.
+
+```yaml
+evaluation:
+  evaluation_id: string
+  fixture_ref: public-or-local-declared-reference
+  fixture_sha256: string
+  ground_truth_ref: public-or-local-declared-reference|null
+  ground_truth_sha256: string|null
+  split_or_subset: string
+  preprocessing:
+    spec_version: string
+    canonical_spec_sha256: string
+  sample_count: int|null
+  task: string
+  metric_id: string
+```
+
+The fixture, labels/ground truth when separate, split, preprocessing
+specification, and their hashes are part of the run manifest. A local fixture
+is allowed for the reproducible demo, but it must be declared and must not be
+an undeclared private runtime dependency.
+
 ### Device profile
 
 ```yaml
@@ -93,8 +120,13 @@ gated adapters must fail clearly when the profile is not approved or compatible.
 
 ```yaml
 constraints:
-  quality_metric: string
-  max_quality_drop: number|null
+  quality:
+    metric_id: string
+    metric_name: string
+    direction: higher_is_better | lower_is_better
+    drop_mode: absolute | relative
+    allowed_degradation: number
+    baseline_value: number|null
   max_p95_latency_ms: number|null
   max_memory_mb: number|null
   min_throughput: number|null
@@ -120,7 +152,16 @@ candidate:
 ```yaml
 evidence:
   candidate_id: string
-  correctness: {metric: number, tolerance: number, passed: bool}
+  evaluation_id: string
+  correctness:
+    metric_id: string
+    direction: higher_is_better | lower_is_better
+    drop_mode: absolute | relative
+    baseline_value: number
+    candidate_value: number
+    allowed_degradation: number
+    computed_degradation: number
+    passed: bool # derived by the rule below; not an independent assertion
   latency_ms: {p50: number, p95: number, unit: string}
   throughput: number|null
   peak_memory_mb: number|null
@@ -133,12 +174,31 @@ evidence:
   artifact_sha256: string
 ```
 
+`correctness.passed` is mechanically derived from the recorded values. First
+compute raw degradation in metric units:
+
+```text
+higher_is_better: raw = max(0, baseline_value - candidate_value)
+lower_is_better:  raw = max(0, candidate_value - baseline_value)
+```
+
+For `drop_mode: absolute`, `computed_degradation = raw`. For
+`drop_mode: relative`, `computed_degradation = raw / abs(baseline_value)` and
+the comparison fails when `baseline_value` is zero, missing, non-finite, or
+otherwise lacks a valid denominator. The candidate passes quality when
+`computed_degradation <= allowed_degradation`; missing/non-finite values fail.
+An improvement is clamped to zero degradation. The evidence must retain the
+direction, mode, baseline, candidate, allowed threshold, and computed result so
+the verifier can audit the decision without trusting a prose explanation.
+
 ### Provenance/run manifest
 
 The manifest binds task/run ID, Git commit and dirty state, resolved
 configuration, parent and candidate hashes, tool/runtime versions, target
-profile, seed, benchmark protocol, evidence, critic decision, and approval
-state. It must distinguish measured fields from assumptions and failures.
+profile, seed, the complete immutable evaluation specification, benchmark
+protocol, evidence, critic decision, and approval state. It must distinguish
+measured fields from assumptions and failures. Baseline and every candidate
+evidence record reference the same `evaluation_id` for a v0 comparison.
 
 ## State machine
 

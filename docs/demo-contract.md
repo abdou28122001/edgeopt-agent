@@ -7,11 +7,15 @@ The demo is successful only if a judge can visibly follow one real run:
 1. TrueForge UI/session is visible with the EdgeOpt task and state.
 2. The agent calls at least one real typed MCP tool.
 3. Candidate code executes in the sandbox.
-4. A preserved baseline produces concrete evidence.
+4. A preserved baseline produces concrete evidence using one declared,
+   reproducible evaluation fixture. The fixture identity, content/label hashes,
+   split, preprocessing version/hash, and evaluation ID are visible in the
+   manifest/report.
 5. The workflow evaluates at least two candidate outcomes, or, if time is
    tight, visibly shows one accepted and one rejected path.
 6. The critic cites measured evidence such as correctness, P95 latency,
-   provider, or memory; it does not judge from prose alone.
+   provider, or memory; it does not judge from prose alone. Correctness uses
+   the documented metric direction and absolute/relative degradation rule.
 7. The workflow pauses visibly at `approval_required` before packaging.
 8. Packaging happens only after the human approves.
 9. The final report/run manifest identifies the selected result, rejected
@@ -31,8 +35,10 @@ If advanced adapters, remote hardware, or a richer model fail, use the CPU
 ONNX Runtime path with a tiny reproducible fixture. The fallback must still
 show a real MCP tool, sandbox execution, baseline evidence, a candidate
 comparison, critic reasoning, the human approval pause, and a post-approval
-manifest. Label the target as CPU/ONNX Runtime and do not imply TensorRT or
-Model Optimizer support.
+manifest. Baseline and candidate must use the same declared fixture and
+`evaluation_id`; show its content hash (and separate ground-truth hash when
+applicable) in the report. Label the target as CPU/ONNX Runtime and do not
+imply TensorRT or Model Optimizer support.
 
 ## Acceptance evidence
 
