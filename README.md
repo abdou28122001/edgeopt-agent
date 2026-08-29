@@ -41,6 +41,11 @@ slice does not measure memory; supplying it fails closed. A future adapter may
 support it only with measured memory evidence. Local evidence also carries a
 private HMAC attestation held under the ignored `.edgeopt-state/` directory;
 the key is generated locally and is never included in manifests or packages.
+Distributed live runs instead supply one ephemeral per-run attestation key
+out-of-band to both the sandbox process and host verifier; the key is never
+part of evidence, output, or a package. Artifact identity is its SHA-256, so a
+verified artifact may move between isolated execution and packaging hosts.
+The final TrueForge run still pauses `edgeopt_package` for human approval.
 
 ## Flow
 
