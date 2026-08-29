@@ -1,5 +1,34 @@
-.venv/
-*.egg-info/
-.edgeopt-demo/
+# Python
 __pycache__/
 *.py[cod]
+.venv/
+venv/
+*.egg-info/
+
+# Secrets
+.env
+.env.*
+*.key
+*.pem
+
+# Models and datasets
+*.pt
+*.pth
+*.onnx
+*.engine
+*.trt
+*.weights
+datasets/
+models/
+
+# Generated work
+.edgeopt-demo/
+artifacts/
+outputs/
+runs/
+*.log
+
+# Editors / OS
+.vscode/
+.idea/
+.DS_Store
