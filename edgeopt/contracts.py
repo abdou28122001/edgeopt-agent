@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any
 
@@ -12,6 +12,11 @@ from typing import Any
 def canonical_hash(value: Any) -> str:
     payload = json.dumps(value, sort_keys=True, separators=(",", ":"), allow_nan=False).encode()
     return hashlib.sha256(payload).hexdigest()
+
+
+def evidence_hash(record: dict[str, Any]) -> str:
+    """Hash all persisted evidence except the self-referential hash field."""
+    return canonical_hash({key: value for key, value in record.items() if key != "evidence_sha256"})
 
 
 def file_sha256(path: str | Path) -> str:
@@ -39,6 +44,10 @@ class DeploymentContract:
             raise ValueError("T006 requires an ONNX model contract")
         if self.objectives.get("priority") not in {"speed", "quality", "memory", "balanced", "custom"}:
             raise ValueError("objectives.priority is not a supported value")
+        if self.objectives.get("priority") == "custom" and not self.objectives.get("custom_metric"):
+            raise ValueError("custom priority requires custom_metric")
+        if self.objectives.get("max_memory_mb") is not None:
+            raise ValueError("max_memory_mb is not measured by the CPU v0 path")
 
     def to_dict(self) -> dict[str, Any]:
         self.validate()

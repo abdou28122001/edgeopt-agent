@@ -8,7 +8,7 @@ from pathlib import Path
 from mcp.server.fastmcp import FastMCP
 
 from .contracts import DeploymentContract, QualityRule
-from .runtime import package, reject_unsupported, run_demo
+from .runtime import package, verify
 
 mcp = FastMCP("edgeopt")
 
@@ -24,7 +24,9 @@ def edgeopt_inspect(spec_path: str) -> dict:
 @mcp.tool()
 def edgeopt_verify(run_manifest_path: str) -> dict:
     manifest = json.loads(Path(run_manifest_path).read_text())
-    return manifest["decision"]
+    contract = DeploymentContract(**manifest["contract"])
+    rule = QualityRule(**manifest["quality_rule"])
+    return verify(contract, manifest["baseline"], manifest["candidate"], rule)
 
 
 @mcp.tool()
