@@ -10,7 +10,8 @@ The demo is successful only if a judge can visibly follow one real run:
 4. A preserved baseline produces concrete evidence using one declared,
    reproducible evaluation fixture. The fixture identity, content/label hashes,
    split, preprocessing version/hash, and evaluation ID are visible in the
-   manifest/report.
+   manifest/report. Candidate correctness is compared under the same frozen
+   quality-rule ID/version/hash and baseline evidence identity.
 5. The workflow evaluates at least two candidate outcomes, or, if time is
    tight, visibly shows one accepted and one rejected path.
 6. The critic cites measured evidence such as correctness, P95 latency,
@@ -37,8 +38,9 @@ show a real MCP tool, sandbox execution, baseline evidence, a candidate
 comparison, critic reasoning, the human approval pause, and a post-approval
 manifest. Baseline and candidate must use the same declared fixture and
 `evaluation_id`; show its content hash (and separate ground-truth hash when
-applicable) in the report. Label the target as CPU/ONNX Runtime and do not
-imply TensorRT or Model Optimizer support.
+applicable) plus the resolved quality-rule and baseline evidence identities in
+the report. Label the target as CPU/ONNX Runtime and do not imply TensorRT or
+Model Optimizer support.
 
 ## Acceptance evidence
 

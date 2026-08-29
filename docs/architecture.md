@@ -120,19 +120,48 @@ gated adapters must fail clearly when the profile is not approved or compatible.
 
 ```yaml
 constraints:
-  quality:
+  quality_request:
     metric_id: string
     metric_name: string
     direction: higher_is_better | lower_is_better
     drop_mode: absolute | relative
     allowed_degradation: number
-    baseline_value: number|null
   max_p95_latency_ms: number|null
   max_memory_mb: number|null
   min_throughput: number|null
   max_model_size_mb: number|null
   evaluation_budget: int
 ```
+
+`quality_request` is the user's input only. After the baseline is measured, the
+run resolves one immutable quality rule. The resolved rule, rather than a
+candidate-supplied copy of these fields, is the sole authority for comparison.
+
+### Resolved quality rule
+
+```yaml
+quality_rule:
+  quality_rule_id: string
+  version: string
+  sha256: string
+  evaluation_id: string
+  metric_id: string
+  direction: higher_is_better | lower_is_better
+  drop_mode: absolute | relative
+  allowed_degradation: number
+  baseline_evidence_id: string
+  baseline_evidence_sha256: string
+  baseline_value: number
+```
+
+The resolver copies the metric identity/direction/mode/threshold from the
+declared request, binds them to the baseline evidence produced under the same
+`evaluation_id`, canonicalizes the object, and records its ID, version, and
+hash. The rule is frozen before the first candidate comparison. A baseline
+record has an `evidence_id`, `evaluation_id`, `metric_id`, measured `value`,
+and artifact/input provenance; it is the only source of `baseline_value`.
+Candidate evidence cannot supply or replace the baseline, threshold, direction,
+or metric identity.
 
 ### Candidate configuration
 
@@ -147,21 +176,35 @@ candidate:
   status: planned | running | rejected | measured | recommended | failed
 ```
 
-### Deployment evidence
+### Baseline and candidate deployment evidence
 
 ```yaml
-evidence:
+baseline_evidence:
+  evidence_id: string
+  evaluation_id: string
+  metric_id: string
+  value: number
+  artifact_sha256: string
+  measured_at: string
+
+candidate_evidence:
+  evidence_id: string
   candidate_id: string
   evaluation_id: string
+  quality_rule_id: string
+  quality_rule_version: string
+  quality_rule_sha256: string
+  baseline_evidence_id: string
+  baseline_evidence_sha256: string
   correctness:
-    metric_id: string
-    direction: higher_is_better | lower_is_better
-    drop_mode: absolute | relative
-    baseline_value: number
+    metric_id: string # derived from evaluation.metric_id and quality_rule
+    direction: higher_is_better | lower_is_better # derived from quality_rule
+    drop_mode: absolute | relative # derived from quality_rule
+    baseline_value: number # derived from the referenced baseline evidence
     candidate_value: number
-    allowed_degradation: number
-    computed_degradation: number
-    passed: bool # derived by the rule below; not an independent assertion
+    allowed_degradation: number # derived from quality_rule
+    computed_degradation: number # verifier-computed
+    passed: bool # verifier-computed; not an independent assertion
   latency_ms: {p50: number, p95: number, unit: string}
   throughput: number|null
   peak_memory_mb: number|null
@@ -174,8 +217,22 @@ evidence:
   artifact_sha256: string
 ```
 
-`correctness.passed` is mechanically derived from the recorded values. First
-compute raw degradation in metric units:
+The initial baseline evidence is produced under the evaluation specification
+and records its own identity/hash before the quality rule is frozen. The
+resolver then uses that baseline record to create the quality rule. Every
+candidate evidence record references the baseline identity and the frozen
+quality-rule ID/version/hash. Repeated metric, direction, mode, threshold, and
+baseline fields in `candidate_evidence` are derived audit output only: the
+verifier MUST assert that they equal the referenced evaluation specification,
+frozen quality rule, and baseline evidence, and MUST fail closed on any
+mismatch. The verifier also MUST fail closed when evaluation IDs, rule hashes,
+baseline hashes, or required values are missing, stale, non-finite, or
+inconsistent. No candidate/evidence field can independently configure the
+comparison.
+
+`correctness.passed` is mechanically derived from the frozen quality rule and
+the referenced baseline/candidate values. After all bindings pass, compute raw
+degradation in metric units:
 
 ```text
 higher_is_better: raw = max(0, baseline_value - candidate_value)
@@ -196,9 +253,11 @@ the verifier can audit the decision without trusting a prose explanation.
 The manifest binds task/run ID, Git commit and dirty state, resolved
 configuration, parent and candidate hashes, tool/runtime versions, target
 profile, seed, the complete immutable evaluation specification, benchmark
-protocol, evidence, critic decision, and approval state. It must distinguish
+protocol, the frozen quality rule, baseline evidence identity/hash, candidate
+evidence identity/hash, critic decision, and approval state. It must distinguish
 measured fields from assumptions and failures. Baseline and every candidate
-evidence record reference the same `evaluation_id` for a v0 comparison.
+evidence record reference the same `evaluation_id` and resolved quality-rule
+binding for a v0 comparison.
 
 ## State machine
 
