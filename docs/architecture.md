@@ -56,8 +56,10 @@ themselves. The local runtime adds an HMAC-SHA256 attestation using a randomly
 generated key in the ignored, private `.edgeopt-state/attestation.key` (best-
 effort mode `0600`). The key is not in manifests, packages, logs, or Drive.
 MCP callers may edit a manifest and recompute its public SHA-256, but they
-cannot produce a valid attestation without the runtime-owned key. A later
-TrueForge integration may inject an ephemeral per-run secret into the sandbox.
+cannot produce a valid attestation without the runtime-owned key. The live
+TrueForge integration injects one ephemeral per-run secret out of band into
+both the sandbox process and the host verifier; it is never part of evidence,
+output, logs, or packages.
 
 ## Adapter and optimization boundaries
 
